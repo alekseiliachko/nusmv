@@ -1,0 +1,298 @@
+MODULE PlainTask(command, prior)
+VAR
+	state: {Running, Ready, Suspended};
+	priority: 0..3;
+	isFinished: boolean;
+ASSIGN
+	INIT state = Suspended;
+	INIT priority = prior;
+	INIT isFinished = FALSE;
+
+ASSIGN	
+	next(state) := 
+		case
+			(command = Nop) : state;
+			(state = Suspended & command = Activate) : Ready;
+			(state = Ready & command = Start) : Running;
+			(state = Running & command = Preempt) : Ready;
+			(state = Running & command = Terminate) : Suspended;
+			TRUE : state;
+		esac;
+		
+	next(priority) := priority;
+	next(isFinished) := 
+		case
+			(command = Terminate) : TRUE;
+			TRUE : isFinished;
+		esac;
+
+--------------------------------------------------------------------------------------------------	
+--------------------------------------------------------------------------------------------------	
+--------------------------------------------------------------------------------------------------
+
+
+MODULE ExtendedTask(command, prior)
+VAR
+	state: {Suspended, Ready, Running, Waiting};
+	priority: 0..3;
+	isFinished: boolean;
+ASSIGN 
+	INIT state = Suspended;
+	INIT priority = prior;
+	INIT isFinished = FALSE;
+
+ASSIGN
+	next(state) := 
+		case
+			(command = Nop) : state;
+			(state = Suspended & command = Activate) : Ready;
+			(state = Ready & command = Start) : Running;
+			(state = Running & command = Preempt) : Ready;
+			(state = Running & command = Terminate) : Suspended;
+			(state = Running & command = Wait) : Waiting;
+			(state = Waiting & command = Release) : Ready;
+			TRUE : state;
+		esac;
+
+    next(priority) := priority; 
+	next(isFinished) := 
+		case
+			(command = Terminate) : TRUE;
+			TRUE : isFinished;
+		esac;
+	
+--------------------------------------------------------------------------------------------------	
+--------------------------------------------------------------------------------------------------	
+--------------------------------------------------------------------------------------------------	
+	
+--	task1, task2, task3 are extended
+MODULE Sheduler(task1, task2, task3, task4, task5, task6)
+VAR
+	cmd1 : {Activate, Start, Preempt, Terminate, Wait, Release, Nop};
+	cmd2 : {Activate, Start, Preempt, Terminate, Wait, Release, Nop};
+	cmd3 : {Activate, Start, Preempt, Terminate, Wait, Release, Nop};
+	cmd4 : {Activate, Start, Preempt, Terminate, Nop};
+	cmd5 : {Activate, Start, Preempt, Terminate, Nop};
+	cmd6 : {Activate, Start, Preempt, Terminate, Nop};
+	
+	priority: 0..3;
+	
+	startask6 : boolean;
+	startask5 : boolean;
+
+	tak_1_before_6: 0..2;
+	tak_2_before_5: 0..2;
+
+ASSIGN
+	INIT cmd1 = Start;
+	INIT cmd2 = Start;
+	INIT cmd3 = Start;
+	INIT cmd4 = Start;
+	INIT cmd5 = Nop;
+	INIT cmd6 = Nop;
+	INIT priority = 3;
+	INIT startask6 = FALSE;
+	INIT startask5  = FALSE;
+	INIT tak_1_before_6 = 0;
+	INIT tak_2_before_5 = 0;
+
+ASSIGN	
+	next(priority) := 
+		case
+			task1.state = Ready & task1.priority > priority : task1.priority;
+			task2.state = Ready & task2.priority > priority : task2.priority;
+			task3.state = Ready & task3.priority > priority : task3.priority;
+			task4.state = Ready & task4.priority > priority : task4.priority;
+			task5.state = Ready & task5.priority > priority : task5.priority;
+			task6.state = Ready & task6.priority > priority : task6.priority;
+			TRUE : priority;
+		esac;
+	
+	next(tak_1_before_6) :=
+        case 
+            tak_1_before_6 = 0 & task1.state = Ready : 1;
+            tak_1_before_6 = 0 & task6.state = Ready : 2;
+            tak_1_before_6 = 1 & task6.state = Ready & task1.state != Ready : 2;
+            tak_1_before_6 = 2 & task1.state = Ready & task6.state != Ready : 1;
+            task1.state != Ready & task6.state != Ready : 0;
+			TRUE: tak_1_before_6;
+        esac;
+
+	next(tak_2_before_5) :=
+        case 
+            tak_2_before_5 = 0 & task2.state = Ready : 1;
+            tak_2_before_5 = 0 & task5.state = Ready : 2;
+            tak_2_before_5 = 1 & task5.state = Ready & task2.state != Ready : 2;
+            tak_2_before_5 = 2 & task2.state = Ready & task5.state != Ready : 1;
+            task2.state != Ready & task5.state != Ready : 0;
+			TRUE: tak_2_before_5;
+        esac;
+
+	next(startask6) := 
+		case
+			task6.state = Running : TRUE;
+			TRUE : FALSE;
+		esac;
+	
+	next(cmd1) := 
+		case
+			task1.isFinished = TRUE : Nop;
+			task1.isFinished = FALSE & task1.state = Suspended : Activate;
+			task1.isFinished = FALSE & task1.priority = priority & task1.state = Ready & tak_1_before_6 = 1 : Start;
+			task1.isFinished = FALSE & next(startask6) = TRUE & task1.state = Running : Wait;
+			task1.isFinished = FALSE & next(startask6) = FALSE & task1.state = Waiting : Release;
+			task1.isFinished = FALSE & task1.priority = priority & task1.state = Running : {Terminate, Nop};
+			task1.isFinished = FALSE & task1.priority < priority & task1.state = Running : Preempt;
+			TRUE : Nop;
+		esac;
+		
+	next(startask5) := 
+		case
+			task5.state = Running : TRUE;
+			TRUE : FALSE;
+		esac;
+			
+	next(cmd2) := 
+		case
+			task2.isFinished = TRUE : Nop;
+			task2.isFinished = FALSE & task2.state = Suspended : Activate;
+			task2.isFinished = FALSE & next(cmd1) != Start & task2.priority = priority & task2.state = Ready & tak_2_before_5 = 1 : Start;
+			task2.isFinished = FALSE & next(startask5) = TRUE &  task2.state = Running : Wait;
+			task2.isFinished = FALSE & next(startask5) = FALSE & task2.state = Waiting : Release;
+			task2.isFinished = FALSE & task2.priority = priority & task2.state = Running : {Terminate, Nop};
+			task2.isFinished = FALSE & task2.priority < priority & task2.state = Running : Preempt;
+			TRUE : Nop;
+		esac;
+	
+	next(cmd3) := 
+		case
+			task3.isFinished = TRUE : Nop;
+			task3.isFinished = FALSE & task3.state = Suspended : Activate;
+			task3.isFinished = FALSE & next(cmd1) != Start & next(cmd2) != Start & task3.priority = priority & task3.state = Ready : Start;
+			task3.isFinished = FALSE & next(startask6) = TRUE &  task3.state = Running : Wait;
+			task3.isFinished = FALSE & next(startask6) = FALSE & task3.state = Waiting : Release;
+			task3.isFinished = FALSE & task3.priority = priority & task3.state = Running : {Terminate, Nop};
+			task3.isFinished = FALSE & task3.priority < priority & task3.state = Running : Preempt;
+			TRUE : Nop;
+		esac;
+	
+	next(cmd4) := 
+		case
+			task4.isFinished = TRUE : Nop;
+			task4.isFinished = FALSE & task4.state = Suspended : Activate;
+			task4.isFinished = FALSE & next(cmd1) != Start & next(cmd2) != Start & next(cmd3) != Start & task4.priority = priority & task4.state = Ready : Start;
+			task4.isFinished = FALSE & task4.priority = priority & task4.state = Running : {Terminate, Nop};
+			task4.isFinished = FALSE & task4.priority < priority & task4.state = Running : Preempt;
+			TRUE : Nop;
+		esac;
+			
+	next(cmd5) := 
+		case
+			task5.isFinished = TRUE : Nop;
+			task5.isFinished = FALSE & next(cmd2) != Activate & task2.state != Ready & task5.state = Suspended : Activate;
+			task5.isFinished = FALSE & next(cmd1) != Start & next(cmd2) != Start & next(cmd3) != Start & next(cmd4) != Start & task5.priority = priority & task5.state = Ready & tak_2_before_5 = 2 : Start;
+			task5.isFinished = FALSE & task5.priority = priority & task5.state = Running : {Terminate, Nop};
+			task5.isFinished = FALSE & task5.priority < priority & task5.state = Running : Preempt;
+			TRUE : Nop;
+		esac;
+		
+	next(cmd6) := 
+		case
+			task6.isFinished = TRUE : Nop;
+			task6.isFinished = FALSE & task6.state = Suspended : Activate;
+			task6.isFinished = FALSE & next(cmd1) != Start & next(cmd2) != Start & next(cmd3) != Start 
+				& next(cmd4) != Start & next(cmd5) != Start & task6.priority = priority & task6.state = Ready & tak_1_before_6 = 2 : Start;
+			task6.isFinished = FALSE & task6.priority = priority & task6.state = Running : {Terminate, Nop};
+			task6.isFinished = FALSE & task6.priority < priority & task6.state = Running : Preempt;
+			TRUE : Nop;
+		esac;
+
+--------------------------------------------------------------------------------------------------	
+--------------------------------------------------------------------------------------------------	
+--------------------------------------------------------------------------------------------------	
+	
+MODULE main
+VAR 
+	task1 : ExtendedTask(shed.cmd1, 3);
+	task2 : ExtendedTask(shed.cmd2, 2);
+	task3 : ExtendedTask(shed.cmd3, 0);
+	task4 : PlainTask(shed.cmd4, 1);
+	task5 : PlainTask(shed.cmd5, 2);
+	task6 : PlainTask(shed.cmd6, 3);
+	shed : Sheduler(task1, task2, task3, task4, task5, task6 );
+	
+	
+	CTLSPEC AG (task2.state = Running -> task1.isFinished = TRUE & task6.isFinished = TRUE);
+	CTLSPEC AG (task3.state = Running -> task1.isFinished = TRUE & task2.isFinished = TRUE & task4.isFinished = TRUE & task5.isFinished = TRUE & task6.isFinished = TRUE);
+	CTLSPEC AG (task4.state = Running -> task1.isFinished = TRUE & task2.isFinished = TRUE & task5.isFinished = TRUE & task6.isFinished = TRUE);
+	-- расписать
+	CTLSPEC AG (task2.state = Ready -> task3.state != Running & task4.state != Running)
+
+		
+	
+	CTLSPEC AG (!(
+		(task1.state = Running & task2.state = Running) |
+		(task1.state = Running & task3.state = Running) |
+		(task1.state = Running & task4.state = Running) |
+		(task1.state = Running & task5.state = Running) |
+		(task2.state = Running & task3.state = Running) |
+		(task2.state = Running & task4.state = Running) |
+		(task2.state = Running & task5.state = Running) |
+		(task2.state = Running & task6.state = Running) |
+		(task3.state = Running & task4.state = Running) |
+		(task3.state = Running & task5.state = Running) |
+		(task3.state = Running & task6.state = Running) |
+		(task4.state = Running & task5.state = Running) |
+		(task4.state = Running & task6.state = Running) |
+		(task5.state = Running & task6.state = Running) )
+	);
+	
+	-- хз
+	CTLSPEC AG (task1.state = Ready -> AF(task6.state != Ready));
+	CTLSPEC AG (task2.state = Ready -> AF(task5.state != Ready));
+	-- св-во про N
+	CTLSPEC AG (!(task1.state = Ready & task2.state = Ready & task3.state = Ready & task4.state = Ready & task5.state = Ready & task6.state = Ready))
+	CTLSPEC AG (
+		!(task1.state = Ready & task2.state = Ready & task3.state = Ready & task4.state = Ready & task5.state = Ready & task6.state != Ready) |
+		!(task1.state = Ready & task2.state = Ready & task3.state = Ready & task4.state = Ready & task5.state != Ready & task6.state = Ready) |
+		!(task1.state = Ready & task2.state = Ready & task3.state = Ready & task4.state != Ready & task5.state = Ready & task6.state = Ready) |
+		!(task1.state = Ready & task2.state = Ready & task3.state != Ready & task4.state = Ready & task5.state = Ready & task6.state = Ready) |
+		!(task1.state = Ready & task2.state != Ready & task3.state = Ready & task4.state = Ready & task5.state = Ready & task6.state = Ready) |
+		!(task1.state != Ready & task2.state = Ready & task3.state = Ready & task4.state = Ready & task5.state = Ready & task6.state = Ready) 
+	);
+	
+	CTLSPEC AF (
+		(task1.state = Ready & task2.state = Ready & task3.state = Ready & task4.state = Ready & task5.state != Ready & task6.state != Ready) |
+		(task1.state != Ready & task2.state = Ready & task3.state = Ready & task4.state = Ready & task5.state != Ready & task6.state = Ready) |
+		(task1.state != Ready & task2.state != Ready & task3.state = Ready & task4.state = Ready & task5.state = Ready & task6.state = Ready)
+	
+	);
+	
+	CTLSPEC AG (
+		task1.state = Ready & task6.state = Ready -> AF(shed.cmd1 = Start & shed.cmd6 != Start)
+	);
+	
+
+
+	
+	
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

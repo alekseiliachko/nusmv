@@ -1,0 +1,134 @@
+--------------------------------------------------
+---- Button ---------------------------------
+--------------------------------------------------
+MODULE Button(reset)
+VAR
+	status: { Pressed, NotPressed };
+	targetFloor : 1..9;
+ASSIGN
+	init(status) := NotPressed;
+
+	TRANS status = Pressed & (reset = FALSE) -> next(status) = Pressed; 
+	TRANS status = Pressed & (reset = TRUE) -> next(status) = NotPressed; 
+	TRANS status = NotPressed -> next(status) in {Pressed, NotPressed};
+	
+	TRANS status = NotPressed -> next(targetFloor) in {1, 2, 3, 4, 5, 6, 7, 8, 9};
+	TRANS status = Pressed -> next(targetFloor) = targetFloor;
+
+--------------------------------------------------
+---- Lift ---------------------------------
+--------------------------------------------------
+MODULE Lift(command, targetFloor)
+VAR
+	floor : 1..9;
+    status : { Move, Stop };
+ASSIGN
+	INIT status = Stop;
+
+	TRANS command = Up -> next(status) = Move & next(floor) = floor + 1;
+	TRANS command = Down -> next(status) = Move & next(floor) = floor - 1;
+	TRANS command = Stop -> next(status) = Stop & next(floor) = floor;
+	TRANS command = Nop -> next(status) = status;
+
+--------------------------------------------------
+---- Door ---------------------------------
+--------------------------------------------------
+MODULE Door(command)
+VAR
+	status : {Open, Close};
+ASSIGN
+	init(status) := Open;
+
+	TRANS status = Close & (command = Close) -> next(status) = Close;
+	TRANS status = Open & (command = Open) -> next(status) = Open;
+	TRANS status = Open & (command = Close) -> next(status) = Close;
+	TRANS status = Close & (command = Open) -> next(status) = Open;
+	TRANS command = Nop -> next(status) = status;
+
+
+--------------------------------------------------
+---- Controller ---------------------------------
+--------------------------------------------------
+MODULE Controller(lftStatus, lftFloor, btn, dor, newFloor)
+VAR
+	btnReset: boolean;
+	liftPhase : {Up, Down, Stop, Nop};
+	doorPhase : { Open, Close, Nop };
+	commonPhase : {Start, Stop, Wait};
+	
+ASSIGN
+	INIT btnReset = FALSE;
+	INIT liftPhase = Nop;
+	INIT doorPhase = Nop;
+	INIT commonPhase = Wait;
+	
+ASSIGN
+	next(commonPhase) :=
+        case
+            (lftStatus = Stop) & (btn = Pressed) & (dor = Open) & (commonPhase = Wait): Start;
+            (lftStatus = Stop) & (btn = Pressed) & (dor = Open) & (commonPhase = Stop): Wait;
+            lftStatus = Move & (lftFloor = newFloor): Stop;
+            TRUE : commonPhase;
+        esac;
+    next(btnReset) :=
+        case
+            (lftStatus = Stop) & (btn = Pressed) & (dor = Open) & (commonPhase = Stop) : TRUE;
+            TRUE : FALSE;
+        esac;
+    next(doorPhase) :=
+        case
+            (lftStatus = Stop) & (btn = Pressed) & (dor = Open) & (commonPhase = Start) : Close;
+            (lftStatus = Stop) & (btn = Pressed) & (dor = Close) & (commonPhase = Stop) : Open;
+            TRUE : Nop;
+        esac;
+    next(liftPhase) :=
+        case
+            (lftStatus = Stop) & (btn = Pressed) & (dor = Close) & (commonPhase = Start) & (lftFloor <= newFloor) : Up;
+            (lftStatus = Move) & (btn = Pressed) & (dor = Close) & (commonPhase = Start) & (lftFloor < newFloor) : Up;
+            (lftStatus = Stop) & (btn = Pressed) & (dor = Close) & (commonPhase = Start) & (lftFloor > newFloor) : Down;
+            (lftStatus = Move) & (btn = Pressed) & (dor = Close) & (commonPhase = Start) & (lftFloor > newFloor) : Down;
+            lftStatus = Move & (lftFloor = newFloor): Stop;
+            TRUE : Nop;
+        esac;
+
+--------------------------------------------------
+---- The main module -----------------------------
+--------------------------------------------------
+MODULE main
+VAR
+	button: Button(controller.btnReset);
+    door: Door(controller.doorPhase);
+    elev: Lift(controller.liftPhase, button.targetFloor);
+    controller: Controller(elev.status, elev.floor, button.status, door.status, button.targetFloor);
+	
+-- 1) контроллер выдает команду stop только в том случае, если кабина движется вверх или вниз. 	
+CTLSPEC AG (elev.status = Move -> AF(controller.liftPhase = Stop))
+
+-- 2) контроллер выдает команду up (down) только в том случае, если кабина находится в состоянии stop. 
+CTLSPEC AG (elev.status = Stop -> EF(controller.liftPhase = Up | controller.liftPhase = Down))
+CTLSPEC AG (elev.status != Stop -> AF(controller.liftPhase != Up | controller.liftPhase != Down))
+
+-- 3) контроллер выдает команду на открытие двери только в том случае, если двери закрыта.
+CTLSPEC AG (door.status = Close -> AF(controller.doorPhase = Open));
+
+-- 4) контроллер выдает команду на закрытие двери только в том случае, если дверь открыта. 
+CTLSPEC AG (door.status = Open -> EF(controller.doorPhase = Close));
+CTLSPEC AG (door.status != Open -> AF(controller.doorPhase != Close));
+
+-- 5) ни одна кнопка не должна быть бесконечно нажатой
+CTLSPEC AG (button.status = Pressed -> AF(button.status = NotPressed));
+
+-- 6) никакая нажатая кнопка не может быть сброшена до тех пор, пока кабина не
+-- остановится на соответствующем этаже и пока не откроются двери. 
+CTLSPEC AG (button.status = Pressed -> A[controller.btnReset = FALSE U button.targetFloor = elev.targetFloor & door.status = Open & controller.btnReset = TRUE]);
+
+-- 7) кнопка должна быть сброшена, как только кабина остановится на соответствующем этаже и дверь откроются. 
+CTLSPEC AG (elev.targetFloor = button.targetFloor & door.status = Open & controller.commonPhase = Stop -> AX(controller.btnReset = TRUE));
+
+-- 8) кабина может двигаться только тогда, когда дверь закрыта. 
+CTLSPEC AG (elev.status = Move -> door.status = Close);
+
+-- 9) если ни одна кнопка не нажата, контроллер не выдает никаких команд и кабина стоит на месте. 
+CTLSPEC AG (button.status = NotPressed -> controller.doorPhase = Nop & controller.liftPhase = Nop & elev.status = Stop);
+
+CTLSPEC AG (elev.floor = 5 & button.targetFloor = 6 & button.targetFloor = 5 -> AX(elev.floor = 6))

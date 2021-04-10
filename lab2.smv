@@ -1,0 +1,124 @@
+--------------------------------------------------
+---- HairDresser ---------------------------------
+--------------------------------------------------
+MODULE Hairdresser(payment, queue, card)
+VAR
+	status: { DoHair, TakePayment, Sleep };
+	curClient : 0..100;
+ASSIGN
+	init(status) := Sleep;
+	
+	-- условие работы
+	TRANS status = Sleep & queue = 0 -> next(status) = Sleep;
+	TRANS status = Sleep & queue != 0 -> (
+		next(status) = DoHair & next(queue) = queue - 1
+	);
+
+	-- логика работы
+	TRANS status = DoHair & payment = FALSE -> next(status) = DoHair; -- секция занята
+	TRANS status = DoHair & payment = TRUE & card = TRUE -> next(status) = TakePayment & next(card) in {TRUE, FALSE}; -- секция свободна
+	TRANS status = DoHair & payment = TRUE -> next(status) = TakePayment; --  секция свободна
+	TRANS status = TakePayment & queue != 0 -> (
+		next(status) = DoHair & next(queue) = queue - 1
+	);
+	TRANS status = TakePayment & (queue = 0) -> next(status) = Sleep;
+ 
+VAR
+	req: boolean;
+ASSIGN
+	req := status in { DoHair, TakePayment };
+
+
+
+--------------------------------------------------
+---- The Arbiter ---------------------------------
+--------------------------------------------------
+MODULE Arbiter(req0, req1, req2)
+VAR
+	auth0: boolean;
+	auth1: boolean;
+	auth2: boolean;
+	tmp01: boolean;
+	tmp02: boolean;
+ASSIGN
+	init(auth0) := FALSE;
+	init(auth1) := FALSE;
+	init(auth2) := FALSE;
+
+	tmp01 := req0 & !auth1 & !auth2;	
+	next(auth0) := tmp01;
+	tmp02 := req1 & !tmp01 & !auth2;
+	next(auth1) := tmp02;
+	next(auth2) := req2 & !tmp02 & !tmp01;
+
+
+--------------------------------------------------
+--------- Client ---------------------------------
+--------------------------------------------------
+MODULE Client
+DEFINE
+    sofaSize := 2;
+    standSize := 1;
+VAR
+	newClient: boolean; 
+	
+	day: 1..30;
+    card: boolean;
+	sofa: 0..sofaSize;
+    stand: 0..standSize;
+    
+    H0: Hairdresser(Ar.auth0, sofa, card); 
+	H1: Hairdresser(Ar.auth1, sofa, card); 
+	H2: Hairdresser(Ar.auth2, sofa, card); 
+	Ar: Arbiter(H0.req, H1.req, H2.req);
+ASSIGN
+	
+	INIT card = TRUE;
+	INIT day = 1;
+	INIT sofa = 0;
+	INIT stand = 0;
+
+	-- диван
+	TRANS (newClient = TRUE) & (sofa < sofaSize) -> next(sofa) = sofa + 1;
+	TRANS (newClient = TRUE) & (sofa = sofaSize) & (stand < standSize) -> next(stand) = stand + 1;
+	TRANS (newClient = FALSE) -> next(sofa) = sofa & next(stand) = stand
+	TRANS (stand > 0) & (sofa < sofaSize) -> next(stand) = stand - 1 & next(sofa) = sofa + 1;
+		
+ASSIGN 
+	next(newClient) := {TRUE, FALSE};
+	
+	-- условие на карту
+	next(day) :=
+        case
+            (day = 1): day + 1;
+            (day = 30): 1;
+            TRUE : day + 1;
+        esac;
+	next(card) :=
+		case
+			(day = 1): TRUE;
+			TRUE: card;
+		esac;
+
+--------------------------------------------------
+---- The main module -----------------------------
+--------------------------------------------------
+MODULE main
+VAR
+    salon: Client;
+
+-- клиент не может зайти в парикмахерскую если она заполнена
+CTLSPEC AG (((salon.newClient = TRUE) & (salon.stand = salon.standSize) & (salon.sofa = salon.sofaSize)) -> AX (salon.stand = salon.standSize) & (salon.sofa = salon.sofaSize));
+
+-- после стрижки парикмахер всегда принимает оплату
+CTLSPEC AG ((salon.H0.status = DoHair) -> A[salon.H0.status = DoHair U salon.H0.status = TakePayment]);
+CTLSPEC AG ((salon.H1.status = DoHair) -> A[salon.H1.status = DoHair U salon.H1.status = TakePayment]);
+CTLSPEC AG ((salon.H2.status = DoHair) -> A[salon.H2.status = DoHair U salon.H2.status = TakePayment]);
+
+-- если клиента нет парикмахер спит 
+CTLSPEC AG ((salon.sofa = 0) -> AX salon.H0.status = Sleep);
+CTLSPEC AG ((salon.sofa = 0) -> AX salon.H1.status = Sleep);
+CTLSPEC AG ((salon.sofa = 0) -> AX salon.H2.status = Sleep);
+
+-- оплата банковской картой осуществляется раз в месяц
+CTLSPEC AG ((salon.card = FALSE & !(salon.day = 1)) -> AX salon.card = FALSE);

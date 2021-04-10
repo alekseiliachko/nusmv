@@ -1,0 +1,75 @@
+MODULE User(auth)
+VAR
+    status: { NonCritical, Trying, Critical };
+ASSIGN
+    init(status) := NonCritical;
+    next(status) :=
+        case
+            status = NonCritical : { NonCritical, Trying };
+            status = Trying :
+            case
+                next(auth) = FALSE : Trying;
+                next(auth) = TRUE : Critical;
+            esac;
+            status = Critical : { Critical, NonCritical};
+        esac;
+
+    -- (5)    
+JUSTICE status = Critical;
+VAR
+    req: boolean;
+ASSIGN
+    req := status in { Trying, Critical };
+
+--------------------------------------------------
+---- The Arbiter ---------------------------------
+--------------------------------------------------
+MODULE Arbiter(req0, req1, req2)
+VAR
+    auth0: boolean;
+    auth1: boolean;
+    auth2: boolean;
+    
+    tmp01: boolean;
+    tmp02: boolean;
+ASSIGN
+    init(auth0) := FALSE;
+    init(auth1) := FALSE;
+    init(auth2) := FALSE;
+
+    tmp01 := req0 & !auth1 & !auth2;
+    next(auth0) := tmp01;
+    tmp02 := req1 & !tmp01 & !auth2;
+    next(auth1) := tmp02;
+    next(auth2) := req2 & !tmp02 & !tmp01;
+ 
+--------------------------------------------------
+---- The main module -----------------------------
+--------------------------------------------------
+MODULE main
+VAR
+    U0: User(Ar.auth0); --- User 0
+    U1: User(Ar.auth1); --- User 1
+    U2: User(Ar.auth2); --- User 2
+    Ar: Arbiter(U0.req, U1.req, U2.req); 
+ 
+--- (2)
+CTLSPEC AG (U0.status = Critical -> (U1.status != Critical & U2.status != Critical));
+CTLSPEC AG (U1.status = Critical -> (U2.status != Critical & U0.status != Critical));
+CTLSPEC AG (U2.status = Critical -> (U0.status != Critical & U1.status != Critical));
+
+-- check for new Arbiter 
+-- EF - существует путь, где они в критическом
+CTLSPEC EF (U1.status = Critical);
+CTLSPEC EF (U0.status = Critical);
+CTLSPEC EF (U2.status = Critical);
+
+-- (4)
+CTLSPEC AG (U0.status = Trying -> AF (U0.status = Critical));
+CTLSPEC AG (U1.status = Trying -> AF (U1.status = Critical));
+CTLSPEC AG (U2.status = Trying -> AF (U2.status = Critical));
+
+-- check for new condition
+CTLSPEC AG (U0.status = Critical -> AF (U0.status = NonCritical));
+CTLSPEC AG (U1.status = Critical -> AF (U1.status = NonCritical));
+CTLSPEC AG (U2.status = Critical -> AF (U2.status = NonCritical));
